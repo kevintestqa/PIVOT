@@ -1,0 +1,62 @@
+{
+    "application": "Apex Trading",
+    "description": "Fictional mobile trading platform",
+    "components": [
+        {
+            "id": "COMP-001",
+            "name": "BalanceCalculationAPI",
+            "description": "Calculates available balances and buying power",
+            "business_criticality": "HIGH",
+            "owner": "Account Services"
+        },
+        {
+            "id": "COMP-002",
+            "name": "OrderManagementService",
+            "description": "Processes and validates customer trade orders",
+            "business_criticality": "HIGH",
+            "owner": "Trading Engineering"
+        },
+        {
+            "id": "COMP-003",
+            "name": "MarginService",
+            "description": "Calculates margin requirements and buying power",
+            "business_criticality": "HIGH",
+            "owner": "Margin Engineering"
+        },
+        {
+            "id": "COMP-004",
+            "name": "AccountDashboard",
+            "description": "Displays balances and account information",
+            "business_criticality": "MEDIUM",
+            "owner": "Mobile Engineering"
+        },
+        {
+            "id": "COMP-005",
+            "name": "PortfolioService",
+            "description": "Provides portfolio positions and valuation data",
+            "business_criticality": "MEDIUM",
+            "owner": "Portfolio Engineering"
+        },
+        {
+            "id": "COMP-006",
+            "name": "NotificationService",
+            "description": "Delivers trade confirmations and account alerts",
+            "business_criticality": "MEDIUM",
+            "owner": "Messaging Engineering"
+        },
+        {
+            "id": "COMP-007",
+            "name": "AuthenticationService",
+            "description": "Authenticates customers, validates sessions, and enforces authentication requirements",
+            "business_criticality": "HIGH",
+            "owner": "Identity Engineering"
+        },
+        {
+            "id": "COMP-008",
+            "name": "MarketDataService",
+            "description": "Provides real-time and delayed market prices, quotes, and market data used by trading and portfolio services",
+            "business_criticality": "HIGH",
+            "owner": "Market Data Engineering"
+        }
+    ]
+}

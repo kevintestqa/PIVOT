@@ -1,0 +1,55 @@
+{
+    "application": "Apex Trading",
+    "dependencies": [
+        {
+            "id": "DEP-001",
+            "source": "COMP-008",
+            "target": "COMP-002",
+            "relationship": "PROVIDES_MARKET_DATA",
+            "description": "OrderManagementService consumes market data for applicable order validation",
+            "verification_status": "VERIFIED",
+            "last_verified": "2026-10-15",
+            "evidence_source": "Synthetic Apex Trading architecture specification"
+        },
+        {
+            "id": "DEP-002",
+            "source": "COMP-001",
+            "target": "COMP-004",
+            "relationship": "PROVIDES_BALANCE_DATA",
+            "description": "AccountDashboard consumes available balance information from BalanceCalculationAPI",
+            "verification_status": "VERIFIED",
+            "last_verified": "2026-10-15",
+            "evidence_source": "Synthetic Apex Trading architecture specification"
+        },
+        {
+            "id": "DEP-003",
+            "source": "COMP-001",
+            "target": "COMP-002",
+            "relationship": "PROVIDES_BALANCE_DATA",
+            "description": "OrderManagementService consumes available balance and buying power information to validate trade eligibility",
+            "verification_status": "VERIFIED",
+            "last_verified": "2026-10-15",
+            "evidence_source": "Synthetic Apex Trading architecture specification"
+        },
+        {
+            "id": "DEP-004",
+            "source": "COMP-003",
+            "target": "COMP-002",
+            "relationship": "PROVIDES_MARGIN_VALIDATION",
+            "description": "OrderManagementService uses MarginService to validate margin requirements and buying power before accepting applicable orders",
+            "verification_status": "VERIFIED",
+            "last_verified": "2026-10-15",
+            "evidence_source": "Synthetic Apex Trading architecture specification"
+        },
+        {
+            "id": "DEP-005",
+            "source": "COMP-001",
+            "target": "COMP-003",
+            "relationship": "PROVIDES_BALANCE_DATA",
+            "description": "MarginService consumes account balance information to calculate margin buying power and requirements",
+            "verification_status": "VERIFIED",
+            "last_verified": "2026-10-15",
+            "evidence_source": "Synthetic Apex Trading architecture specification"
+        }
+    ]
+}
