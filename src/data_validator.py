@@ -1,14 +1,41 @@
+"""
+PIVOT - Architecture Data Validator
+
+Purpose:
+    Validate architecture dependency records before impact analysis.
+
+Responsibilities:
+    - Identify invalid component references.
+    - Detect duplicate dependency relationships.
+    - Evaluate verification evidence freshness.
+    - Identify missing or malformed verification dates.
+    - Preserve valid records when invalid records are encountered.
+
+Business Rules:
+    - Default verification threshold: 90 days.
+    - Dependencies verified exactly 90 days ago remain current.
+    - Dependencies older than 90 days are STALE.
+    - Missing verification dates are UNVERIFIED.
+    - Future verification dates are INVALID.
+
+Limitations:
+    - Data validation does not determine business risk.
+    - Stale documentation does not prove a dependency is incorrect.
+    - The assessment workflow determines whether incomplete
+      architecture evidence is sufficient for analysis.
+"""
+
+
 from datetime import date
 
 
 class DataValidator:
-    """
-    Validates architecture dependency records.
-
-    Detects invalid records, duplicates, and stale evidence.
-    """
+    """Validate architecture dependency records."""
 
     def __init__(self, components, dependencies, threshold_days=90):
+        if threshold_days < 0:
+            raise ValueError("Threshold cannot be negative")
+
         self.components = components
         self.dependencies = dependencies
         self.threshold_days = threshold_days
@@ -16,19 +43,21 @@ class DataValidator:
     def validate(self, assessment_date=None):
         assessment_date = assessment_date or date.today()
 
-        component_ids = {
-            component["id"] for component in self.components
-        }
+        if isinstance(assessment_date, str):
+            assessment_date = date.fromisoformat(assessment_date)
+
+        component_ids = {component["id"] for component in self.components}
 
         valid_records = []
         invalid_records = []
         duplicates = []
         stale_records = []
+        unverified_records = []
 
         seen = {}
 
-        for dependency in self.dependencies:
-            record_id = dependency.get("id", "UNKNOWN")
+        for index, dependency in enumerate(self.dependencies):
+            record_id = dependency.get("id", f"RECORD-{index}")
             source = dependency.get("source")
             target = dependency.get("target")
 
@@ -40,6 +69,20 @@ class DataValidator:
             if target not in component_ids:
                 errors.append(f"Unknown target: {target}")
 
+            last_verified = dependency.get("last_verified")
+            verified_date = None
+
+            if last_verified:
+                try:
+                    verified_date = date.fromisoformat(last_verified)
+
+                    if verified_date > assessment_date:
+                        errors.append("Verification date is in the future")
+
+                except (ValueError, TypeError):
+                    errors.append("Invalid verification date")
+
+            # Reject the record only after completing validation.
             if errors:
                 invalid_records.append({
                     "record_id": record_id,
@@ -49,8 +92,12 @@ class DataValidator:
 
             valid_records.append(dependency)
 
-            relationship = dependency.get("relationship")
-            key = (source, target, relationship)
+            # Detect duplicate relationships.
+            key = (
+                source,
+                target,
+                dependency.get("relationship")
+            )
 
             if key in seen:
                 duplicates.append({
@@ -60,30 +107,25 @@ class DataValidator:
             else:
                 seen[key] = record_id
 
-            last_verified = dependency.get("last_verified")
+            # Classify verification freshness.
+            if verified_date is None:
+                unverified_records.append({
+                    "record_id": record_id
+                })
+            else:
+                age = (assessment_date - verified_date).days
 
-            if last_verified:
-                try:
-                    verified_date = date.fromisoformat(last_verified)
-                    age = (assessment_date - verified_date).days
-
-                    if age > self.threshold_days:
-                        stale_records.append({
-                            "record_id": record_id,
-                            "age_days": age
-                        })
-
-                except (ValueError, TypeError):
-                    invalid_records.append({
+                if age > self.threshold_days:
+                    stale_records.append({
                         "record_id": record_id,
-                        "errors": ["Invalid verification date"]
+                        "age_days": age
                     })
-                    valid_records.pop()
 
         return {
             "total_records": len(self.dependencies),
             "valid_records": valid_records,
             "invalid_records": invalid_records,
             "duplicates": duplicates,
-            "stale_records": stale_records
+            "stale_records": stale_records,
+            "unverified_records": unverified_records
         }
