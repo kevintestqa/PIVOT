@@ -5,7 +5,8 @@ Purpose:
     Calculate the potential business risk of a proposed application change.
 
 Responsibilities:
-    - Evaluate aggregate criticality of impacted components.
+    - Evaluate source component criticality.
+    - Evaluate aggregate downstream component criticality.
     - Evaluate the scope of potential downstream impacts.
     - Incorporate documented business-rule sensitivity.
     - Support organization-specific scoring configurations.
@@ -13,9 +14,16 @@ Responsibilities:
     - Return explainable risk assessments.
 
 Scoring Model:
-    Component Criticality:    40%
-    Impact Scope:             30%
+    Component Criticality:     40%
+    Impact Scope:              30%
     Business Rule Sensitivity: 30%
+
+Component Criticality:
+    With downstream impacts:
+        60% source + 40% aggregate downstream
+
+    Without documented downstream impacts:
+        100% source
 
 Risk Classification:
     LOW:     Score < 40
@@ -24,10 +32,11 @@ Risk Classification:
 
 Architectural Principles:
     - Risk scoring is deterministic.
-    - Components are counted only once.
+    - Downstream components are counted only once.
     - AI cannot override calculated risk.
     - Evidence confidence is separate from business risk.
     - PIVOT does not automatically approve or reject releases.
+    - No documented dependencies does not prove no dependencies exist.
 
 Limitations:
     Initial weights and thresholds are design assumptions.
@@ -38,25 +47,26 @@ DEFAULT_CONFIG = {
     "weights": {
         "component_criticality": 0.40,
         "impact_scope": 0.30,
-        "business_rule_sensitivity": 0.30
+        "business_rule_sensitivity": 0.30,
     },
     "thresholds": {
         "low": 40,
-        "high": 75
+        "high": 75,
     },
-    "scope_cap": 5
+    "scope_cap": 5,
+    "source_criticality_weight": 0.60,
 }
 
 CRITICALITY_VALUES = {
     "LOW": 1,
     "MEDIUM": 2,
-    "HIGH": 3
+    "HIGH": 3,
 }
 
 SENSITIVITY_VALUES = {
     "LOW": 0,
     "MEDIUM": 50,
-    "HIGH": 100
+    "HIGH": 100,
 }
 
 
@@ -72,10 +82,15 @@ class RiskEngine:
         self.thresholds = self.config["thresholds"]
         self.scope_cap = self.config.get("scope_cap", 5)
 
+        self.source_criticality_weight = self.config.get(
+            "source_criticality_weight",
+            0.60,
+        )
+
         required_factors = {
             "component_criticality",
             "impact_scope",
-            "business_rule_sensitivity"
+            "business_rule_sensitivity",
         }
 
         if set(self.weights) != required_factors:
@@ -106,41 +121,52 @@ class RiskEngine:
         ):
             raise ValueError("scope_cap must be a positive integer")
 
+        if (
+            not isinstance(self.source_criticality_weight, (int, float))
+            or isinstance(self.source_criticality_weight, bool)
+            or not 0 <= self.source_criticality_weight <= 1
+        ):
+            raise ValueError(
+                "source_criticality_weight must be between 0 and 1"
+            )
+
     def assess(
         self,
         change_id,
         impacts,
         components,
         business_rule_sensitivity,
-        critical_business_control=False
+        critical_business_control=False,
+        source_component_id=None,
     ):
         """
-        Calculate risk for a proposed change.
+        Calculate business risk for a proposed change.
 
         Args:
             change_id:
                 Unique identifier for the proposed change.
 
             impacts:
-                List of impacted components returned by DependencyAnalyzer.
+                Downstream components returned by DependencyAnalyzer.
 
             components:
-                Architecture component records containing criticality.
+                Architecture records containing component criticality.
 
             business_rule_sensitivity:
                 Documented sensitivity: LOW, MEDIUM, or HIGH.
 
             critical_business_control:
                 Whether documented evidence identifies a critical
-                business control affected by the proposed change.
+                business control affected by the change.
+
+            source_component_id:
+                Identifier of the component being modified.
+
+                Optional temporarily for compatibility with existing
+                tests and callers. New assessments should provide it.
 
         Returns:
-            Dictionary containing risk classification, weighted score,
-            factor breakdown, safeguards, and explanatory reasons.
-
-        Raises:
-            ValueError:
-                If supplied component or business-rule data is invalid.
+            Explainable deterministic risk assessment.
         """
 
         if business_rule_sensitivity not in SENSITIVITY_VALUES:
@@ -156,15 +182,26 @@ class RiskEngine:
             for component in components
         }
 
-        # Count each impacted component once, regardless of path count.
+        # Count each downstream component once.
         impacted_ids = sorted({
             impact["component_id"]
             for impact in impacts
         })
 
-        criticality_values = []
+        if source_component_id is not None:
 
-        for component_id in impacted_ids:
+            if source_component_id not in component_map:
+                raise ValueError(
+                    f"Unknown source component: {source_component_id}"
+                )
+
+            if source_component_id in impacted_ids:
+                raise ValueError(
+                    "Source component cannot be a downstream impact"
+                )
+
+        def normalized_criticality(component_id):
+            """Convert documented component criticality to a 0-100 score."""
 
             if component_id not in component_map:
                 raise ValueError(
@@ -178,26 +215,56 @@ class RiskEngine:
                     f"Invalid criticality for {component_id}"
                 )
 
-            criticality_values.append(
-                CRITICALITY_VALUES[criticality]
-            )
-
-        # Normalize aggregate criticality to a 0–100 scale.
-        if criticality_values:
-            average_criticality = (
-                sum(criticality_values) / len(criticality_values)
-            )
-
-            criticality_score = (
-                (average_criticality - 1) / 2
+            return (
+                (CRITICALITY_VALUES[criticality] - 1) / 2
             ) * 100
-        else:
-            criticality_score = 0
 
-        # Normalize the number of unique impacted components.
+        # Evaluate downstream criticality.
+        # Use maximum downstream criticality to prevent dilution.
+        downstream_values = [
+            normalized_criticality(component_id)
+            for component_id in impacted_ids
+        ]
+
+        downstream_score = max(downstream_values, default=0)
+
+        # Evaluate source criticality.
+        if source_component_id is not None:
+            source_score = normalized_criticality(
+                source_component_id
+            )
+        else:
+            source_score = None
+
+        # Combine source and downstream criticality.
+        if source_score is None:
+
+            # Temporary compatibility with downstream-only callers.
+            criticality_score = downstream_score
+
+        elif not downstream_values:
+
+            # No documented downstream impact must not dilute
+            # the source component's criticality.
+            criticality_score = source_score
+
+        else:
+            # Source establishes the baseline.
+            # Downstream exposure can increase, never reduce it.
+            downstream_contribution_weight = (
+                1 - self.source_criticality_weight
+            )
+
+            criticality_score = source_score + (
+                (100 - source_score)
+                * (downstream_score / 100)
+                * downstream_contribution_weight
+            )
+
+        # Scope counts downstream components only.
         scope_score = min(
             len(impacted_ids) / self.scope_cap,
-            1
+            1,
         ) * 100
 
         sensitivity_score = SENSITIVITY_VALUES[
@@ -207,7 +274,7 @@ class RiskEngine:
         factor_scores = {
             "component_criticality": round(criticality_score, 2),
             "impact_scope": round(scope_score, 2),
-            "business_rule_sensitivity": sensitivity_score
+            "business_rule_sensitivity": sensitivity_score,
         }
 
         weighted_score = round(
@@ -215,10 +282,9 @@ class RiskEngine:
                 factor_scores[factor] * self.weights[factor]
                 for factor in factor_scores
             ),
-            2
+            2,
         )
 
-        # Apply configured risk thresholds.
         if weighted_score >= self.thresholds["high"]:
             weighted_level = "HIGH"
 
@@ -228,7 +294,7 @@ class RiskEngine:
         else:
             weighted_level = "LOW"
 
-        # A documented critical business control establishes a floor.
+        # Documented critical business controls establish a HIGH floor.
         guardrail_applied = (
             critical_business_control
             and weighted_level != "HIGH"
@@ -242,8 +308,19 @@ class RiskEngine:
 
         reasons = [
             f"{len(impacted_ids)} unique downstream components assessed",
-            f"Business rule sensitivity: {business_rule_sensitivity}"
+            f"Business rule sensitivity: {business_rule_sensitivity}",
         ]
+
+        if source_component_id is not None:
+            reasons.append(
+                f"Changed source component: {source_component_id}"
+            )
+
+            if not impacted_ids:
+                reasons.append(
+                    "No documented downstream impacts; architecture "
+                    "completeness must be assessed separately"
+                )
 
         if critical_business_control:
             reasons.append(
@@ -252,12 +329,25 @@ class RiskEngine:
 
         return {
             "change_id": change_id,
+            "source_component_id": source_component_id,
             "weighted_score": weighted_score,
             "weighted_level": weighted_level,
             "risk_level": final_level,
             "guardrail_applied": guardrail_applied,
             "impacted_component_count": len(impacted_ids),
             "factor_scores": factor_scores,
+            "source_criticality_score": (
+                round(source_score, 2)
+                if source_score is not None
+                else None
+            ),
+            "downstream_criticality_score": round(
+                downstream_score,
+                2,
+            ),
+            "source_criticality_weight": (
+                self.source_criticality_weight
+            ),
             "weights": dict(self.weights),
-            "reasons": reasons
+            "reasons": reasons,
         }
