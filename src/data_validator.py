@@ -10,6 +10,7 @@ Responsibilities:
     - Evaluate verification evidence freshness.
     - Identify missing or malformed verification dates.
     - Preserve valid records when invalid records are encountered.
+    - Provide explainable validation findings.
 
 Business Rules:
     - Default verification threshold: 90 days.
@@ -24,7 +25,6 @@ Limitations:
     - The assessment workflow determines whether incomplete
       architecture evidence is sufficient for analysis.
 """
-
 
 from datetime import date
 
@@ -41,6 +41,8 @@ class DataValidator:
         self.threshold_days = threshold_days
 
     def validate(self, assessment_date=None):
+        """Validate dependencies and return explainable findings."""
+
         assessment_date = assessment_date or date.today()
 
         if isinstance(assessment_date, str):
@@ -84,10 +86,15 @@ class DataValidator:
 
             # Reject the record only after completing validation.
             if errors:
-                invalid_records.append({
-                    "record_id": record_id,
-                    "errors": errors
-                })
+                invalid_records.append(
+                    {
+                        "record_id": record_id,
+                        "source": source,
+                        "target": target,
+                        "errors": errors,
+                        "reason": "; ".join(errors),
+                    }
+                )
                 continue
 
             valid_records.append(dependency)
@@ -96,30 +103,45 @@ class DataValidator:
             key = (
                 source,
                 target,
-                dependency.get("relationship")
+                dependency.get("relationship"),
             )
 
             if key in seen:
-                duplicates.append({
-                    "record_id": record_id,
-                    "duplicate_of": seen[key]
-                })
+                duplicates.append(
+                    {
+                        "record_id": record_id,
+                        "duplicate_of": seen[key],
+                    }
+                )
             else:
                 seen[key] = record_id
 
             # Classify verification freshness.
             if verified_date is None:
-                unverified_records.append({
-                    "record_id": record_id
-                })
+                unverified_records.append(
+                    {
+                        "record_id": record_id,
+                        "source": source,
+                        "target": target,
+                        "reason": "No verification date was provided",
+                    }
+                )
             else:
                 age = (assessment_date - verified_date).days
 
                 if age > self.threshold_days:
-                    stale_records.append({
-                        "record_id": record_id,
-                        "age_days": age
-                    })
+                    stale_records.append(
+                        {
+                            "record_id": record_id,
+                            "source": source,
+                            "target": target,
+                            "age_days": age,
+                            "reason": (
+                                f"Verification is {age} days old, exceeding "
+                                f"the {self.threshold_days}-day threshold"
+                            ),
+                        }
+                    )
 
         return {
             "total_records": len(self.dependencies),
@@ -127,5 +149,5 @@ class DataValidator:
             "invalid_records": invalid_records,
             "duplicates": duplicates,
             "stale_records": stale_records,
-            "unverified_records": unverified_records
+            "unverified_records": unverified_records,
         }
